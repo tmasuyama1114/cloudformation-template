@@ -1,1 +1,1 @@
-# cloudformation-template
+This is the repositry to save AWS CloudFormation templates.
