@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  EnvironmentName:
+    Description: Name which you can specify the environment by this name
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - stg
+      - prd
+  ProjectName:
+    Type: String
+    Default: Practice
+    Description: Project Name
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+  AZ1PublicSubnetCIDR:
+    Type: String
+    Default: 10.0.0.0/24
+  AZ1PrivateSubnetCIDR:
+    Type: String
+    Default: 10.0.1.0/24
+  EC2KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: "AWS::EC2::KeyPair::KeyName"
+  MyIP:
+    Description: IP address range which is allowed to access this EC2 from it
+    Type: String
+    Default: 0.0.0.0/0
+  Region:
+    Type: String
+    Default: ap-northeast-1
+    Description: Please choose the region.
+  AZ:
+    Type: String
+    Default: 1a
+    Description: 1a or 1c or 1d
+
+Resources:
+  # --------------------------------------
+  # VPC and common resources between AZs
+  # --------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-InternetGateway
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId : !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # --------------------------------------
+  # AZ1 resources
+  # --------------------------------------
+  # PublicSubnet
+  AZ1PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref AZ1PublicSubnetCIDR
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PublicSubnet
+  # PrivateSubnet
+  AZ1PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref AZ1PrivateSubnetCIDR
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1c
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PrivateSubnet
+  # RouteTable (PublicSubnet)
+  AZ1RouteTableForPublicSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-RouteTableForPublicSubnet
+  # Route for Internet (InternetGateway) in PublicSubnet
+  AZ1RouteForPublicSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPublicSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  # Route Assocciation
+  AssocciateAZ1RouteTableForPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPublicSubnet
+      SubnetId: !Ref AZ1PublicSubnet
+  # NAT EIP
+  AZ1NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  # NatGateway
+  AZ1NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - AZ1NatGatewayEIP
+          - AllocationId
+      SubnetId: !Ref AZ1PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-NatGateway
+  # RouteTable (PrivateSubnet)
+  AZ1RouteTableForPrivateSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-RouteTableForPrivateSubnet
+  # Route for Internet (NatGateway) in PrivateSubnet
+  AZ1RouteForPrivateSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPrivateSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref AZ1NatGateway
+  # Route Assocciation
+  AssocciateAZ1RouteTableForPrivateSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPrivateSubnet
+      SubnetId: !Ref AZ1PrivateSubnet
