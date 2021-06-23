@@ -147,3 +147,45 @@ Resources:
     Properties:
       RouteTableId: !Ref AZ1RouteTableForPrivateSubnet
       SubnetId: !Ref AZ1PrivateSubnet
+  # EC2 in PublicSubnet
+  EC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      # Amazon Linux 2
+      ImageId: ami-00d101850e971728d
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          SubnetId: !Ref AZ1PublicSubnet
+          GroupSet:
+            - !Ref EC2SecurityGroup
+      UserData: 
+        Fn::Base64: |
+          #!/bin/bash
+          yum -y update
+          yum -y install httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "Apache is runnning by using UserData" > /var/www/html/index.html
+      Tags:
+          - Key: Name
+            Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PublicSubnet-EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ec2-sg-public-subnet
+      GroupDescription: Allow SSH and HTTP access from only MyIP
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # http
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref MyIP
+        # ssh
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP
