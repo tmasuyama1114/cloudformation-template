@@ -22,7 +22,7 @@ Parameters:
   AZ1PrivateSubnetCIDR:
     Type: String
     Default: 10.0.1.0/24
-  EC2KeyName:
+  KeyName:
     Description: The EC2 Key Pair to allow SSH access to the instance
     Type: "AWS::EC2::KeyPair::KeyName"
   MyIP:
@@ -33,10 +33,6 @@ Parameters:
     Type: String
     Default: ap-northeast-1
     Description: Please choose the region.
-  AZ:
-    Type: String
-    Default: 1a
-    Description: 1a or 1c or 1d
 
 Resources:
   # --------------------------------------
@@ -73,10 +69,12 @@ Resources:
       CidrBlock: !Ref AZ1PublicSubnetCIDR
       MapPublicIpOnLaunch: true
       VpcId: !Ref VPC
-      AvailabilityZone: !Ref AZ1
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PublicSubnet
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-PublicSubnet
   # PrivateSubnet
   AZ1PrivateSubnet:
     Type: AWS::EC2::Subnet
@@ -84,10 +82,12 @@ Resources:
       CidrBlock: !Ref AZ1PrivateSubnetCIDR
       MapPublicIpOnLaunch: false
       VpcId: !Ref VPC
-      AvailabilityZone: !Ref AZ1
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PrivateSubnet
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-PrivateSubnet
   # RouteTable (PublicSubnet)
   AZ1RouteTableForPublicSubnet:
     Type: AWS::EC2::RouteTable
@@ -95,7 +95,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-RouteTableForPublicSubnet
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-RouteTableForPublicSubnet
   # Route for Internet (InternetGateway) in PublicSubnet
   AZ1RouteForPublicSubnet:
     Type: AWS::EC2::Route
@@ -125,7 +125,7 @@ Resources:
       SubnetId: !Ref AZ1PublicSubnet
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-NatGateway
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-NatGateway
   # RouteTable (PrivateSubnet)
   AZ1RouteTableForPrivateSubnet:
     Type: AWS::EC2::RouteTable
@@ -133,7 +133,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-RouteTableForPrivateSubnet
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-RouteTableForPrivateSubnet
   # Route for Internet (NatGateway) in PrivateSubnet
   AZ1RouteForPrivateSubnet:
     Type: AWS::EC2::Route
@@ -161,8 +161,8 @@ Resources:
           SubnetId: !Ref AZ1PublicSubnet
           GroupSet:
             - !Ref EC2SecurityGroup
-      UserData: 
-        Fn::Base64: |
+      UserData:
+        Fn::Base64:
           #!/bin/bash
           yum -y update
           yum -y install httpd
@@ -171,7 +171,7 @@ Resources:
           echo "Apache is runnning by using UserData" > /var/www/html/index.html
       Tags:
           - Key: Name
-            Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PublicSubnet-EC2
+            Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-PublicSubnet-EC2
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
