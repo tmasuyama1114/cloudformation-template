@@ -73,7 +73,7 @@ Resources:
       CidrBlock: !Ref AZ1PublicSubnetCIDR
       MapPublicIpOnLaunch: true
       VpcId: !Ref VPC
-      AvailabilityZone: ap-northeast-1a
+      AvailabilityZone: !Ref AZ1
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PublicSubnet
@@ -84,7 +84,7 @@ Resources:
       CidrBlock: !Ref AZ1PrivateSubnetCIDR
       MapPublicIpOnLaunch: false
       VpcId: !Ref VPC
-      AvailabilityZone: ap-northeast-1c
+      AvailabilityZone: !Ref AZ1
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-${AZ}-PrivateSubnet
