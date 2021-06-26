@@ -1,0 +1,486 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  EnvironmentName:
+    Description: Name which you can specify the environment by this name
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - stg
+      - prd
+  ProjectName:
+    Type: String
+    Default: Practice
+    Description: Project Name
+  VpcCIDR:
+    Type: String
+    Default: 10.100.0.0/16
+  AZ1PublicSubnetCIDR:
+    Type: String
+    Default: 10.100.1.0/24
+  AZ1PrivateSubnetCIDR:
+    Type: String
+    Default: 10.100.2.0/24
+  AZ2PublicSubnetCIDR:
+    Type: String
+    Default: 10.100.3.0/24
+  AZ2PrivateSubnetCIDR:
+    Type: String
+    Default: 10.100.4.0/24
+  KeyName:
+    Description : Name of an existing EC2 KeyPair
+    Type: "AWS::EC2::KeyPair::KeyName"
+  Region:
+    Type: String
+    Default: ap-northeast-1
+    Description: Please choose the region.
+
+Resources:
+  # --------------------------------------
+  # VPC and common resources between AZs
+  # --------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-InternetGateway
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId : !Ref InternetGateway
+      VpcId: !Ref VPC
+  ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "-"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: EnvironmentName
+            - "-ALBSG"
+      VpcId:
+        Ref: VPC
+  SecurityGroupForWebServer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-${EnvironmentName}-web-server-sg
+      GroupDescription: Allow SSH and HTTP access from AZ1 Public Subnet CIDR
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # http
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSG
+        # ssh
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AZ1PublicSubnetCIDR
+
+  # --------------------------------------
+  # AZ1 resources
+  # --------------------------------------
+  # PublicSubnet
+  AZ1PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref AZ1PublicSubnetCIDR
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-PublicSubnet
+  # PrivateSubnet
+  AZ1PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref AZ1PrivateSubnetCIDR
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-PrivateSubnet
+  # RouteTable (PublicSubnet)
+  AZ1RouteTableForPublicSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-RouteTableForPublicSubnet
+  # Route for Internet (InternetGateway) in PublicSubnet
+  AZ1RouteForPublicSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPublicSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  # Route Assocciation
+  AssocciateAZ1RouteTableForPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPublicSubnet
+      SubnetId: !Ref AZ1PublicSubnet
+  # NAT EIP
+  AZ1NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  # NatGateway
+  AZ1NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - AZ1NatGatewayEIP
+          - AllocationId
+      SubnetId: !Ref AZ1PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-NatGateway
+    DependsOn: InternetGateway
+  # RouteTable (PrivateSubnet)
+  AZ1RouteTableForPrivateSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-RouteTableForPrivateSubnet
+  # Route for Internet (NatGateway) in PrivateSubnet
+  AZ1RouteForPrivateSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPrivateSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref AZ1NatGateway
+  # Route Assocciation
+  AssocciateAZ1RouteTableForPrivateSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AZ1RouteTableForPrivateSubnet
+      SubnetId: !Ref AZ1PrivateSubnet
+  # EC2 in PublicSubnet
+  AZ1WebServer:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT10S
+    Metadata:
+      Comment: Install a simple web app
+      AWS::CloudFormation::Init:
+        config:
+          packages:
+            yum:
+              httpd: []
+          files:
+            /var/www/html/index.html:
+              content: !Sub |
+                <p>Hello, from ap-northeast-1 1a !</p>
+              mode: '000644'
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              httpd:
+                enabled: 'true'
+                ensureRunning: 'true'
+    Properties:
+      # Amazon Linux 2
+      ImageId: ami-06631ebafb3ae5d34
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "false"
+          DeviceIndex: "0"
+          SubnetId: !Ref AZ1PrivateSubnet
+          GroupSet:
+            - !Ref SecurityGroupForWebServer
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          /opt/aws/bin/cfn-init -v \
+          --stack ${AWS::StackName} \
+          --resource ServerInstance \
+          --region ${AWS::Region}
+
+          # # signal the status from cfn-init
+          # /opt/aws/bin/cfn-signal -e $? \
+          # --stack ${AWS::StackName} \
+          # --resource ServerInstance \
+          # --region ${AWS::Region}
+      # SetInstanceProficeToAccessBySsmSession
+      IamInstanceProfile:
+        Ref: SessionManagerIamInstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ1-Webserver
+    DependsOn: AZ1NatGateway
+
+  # --------------------------------------
+  # AZ2 resources
+  # --------------------------------------
+  # PublicSubnet
+  AZ2PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref AZ2PublicSubnetCIDR
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ2-PublicSubnet
+  # PrivateSubnet
+  AZ2PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref AZ2PrivateSubnetCIDR
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ2-PrivateSubnet
+  # RouteTable (PublicSubnet)
+  AZ2RouteTableForPublicSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ2-RouteTableForPublicSubnet
+  # Route for Internet (InternetGateway) in PublicSubnet
+  AZ2RouteForPublicSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AZ2RouteTableForPublicSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  # Route Assocciation
+  AssocciateAZ2RouteTableForPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AZ2RouteTableForPublicSubnet
+      SubnetId: !Ref AZ2PublicSubnet
+  # NAT EIP
+  AZ2NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  # NatGateway
+  AZ2NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - AZ2NatGatewayEIP
+          - AllocationId
+      SubnetId: !Ref AZ2PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ2-NatGateway
+    DependsOn: InternetGateway
+  # RouteTable (PrivateSubnet)
+  AZ2RouteTableForPrivateSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ2-RouteTableForPrivateSubnet
+  # Route for Internet (NatGateway) in PrivateSubnet
+  AZ2RouteForPrivateSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AZ2RouteTableForPrivateSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref AZ2NatGateway
+  # Route Assocciation
+  AssocciateAZ2RouteTableForPrivateSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AZ2RouteTableForPrivateSubnet
+      SubnetId: !Ref AZ2PrivateSubnet
+  # EC2 in PublicSubnet
+  AZ2WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      # Amazon Linux 2
+      ImageId: ami-00d101850e971728d
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "false"
+          DeviceIndex: "0"
+          SubnetId: !Ref AZ2PrivateSubnet
+          GroupSet:
+            - !Ref SecurityGroupForWebServer
+      # SetInstanceProficeToAccessBySsmSession
+      IamInstanceProfile:
+        Ref: SessionManagerIamInstanceProfile
+      UserData:
+        Fn::Base64:
+          #!/bin/bash
+          # sudo yum -y update
+          sudo yum -y install httpd
+          sudo systemctl start httpd.service
+          sudo systemctl enable httpd.service
+          sudo echo "Web Server in ap-northeast-1 1a" > /var/www/html/index.html
+      Tags:
+          - Key: Name
+            Value: !Sub ${ProjectName}-${EnvironmentName}-${Region}-AZ2-Webserver
+    DependsOn: AZ2NatGateway
+
+  # --------------------------------------
+  # SSM Session Manager related resources
+  # --------------------------------------
+  SsmSessionManagerIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      RoleName: 'SsmSessionManagerIamRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  SessionManagerIamInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref SsmSessionManagerIamRole
+
+  # ----------------------------------------
+  # ALB related resouces
+  # ----------------------------------------
+  ALBTarget:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: '30'
+      HealthCheckPath: "/index.html"
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: '5'
+      HealthyThresholdCount: '5'
+      Matcher:
+        HttpCode: '200'
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: EnvironmentName
+          - "-ALBTarget"
+      Port: '80'
+      Protocol: HTTP
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: EnvironmentName
+            - "-ALBTarget"
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '300'
+      - Key: stickiness.enabled
+        Value: 'false'
+      - Key: stickiness.type
+        Value: lb_cookie
+      - Key: stickiness.lb_cookie.duration_seconds
+        Value: '86400'
+      Targets:
+      - Id: !Ref AZ1WebServer
+        Port: '80'
+      - Id: !Ref AZ2WebServer
+        Port: '80'
+      UnhealthyThresholdCount: '2'
+      VpcId:
+        Ref: VPC
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      LoadBalancerAttributes:
+      - Key: access_logs.s3.enabled
+        Value: 'false'
+      - Key: deletion_protection.enabled
+        Value: 'false'
+      - Key: idle_timeout.timeout_seconds
+        Value: '60'
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: EnvironmentName
+          - "-ALB"
+      Scheme: internet-facing
+      SecurityGroups:
+      - Ref: ALBSG
+      Subnets: [!Ref AZ1PublicSubnet, !Ref AZ2PublicSubnet]
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: EnvironmentName
+            - "-ALB"
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - TargetGroupArn:
+          Ref: ALBTarget
+        Type: forward
+      LoadBalancerArn:
+        Ref: ALB
+      Port: '80'
+      Protocol: HTTP
+Outputs:
+  CheckURL:
+    Value:
+      Fn::Join:
+      - ''
+      - - http://
+        - Fn::GetAtt:
+          - ALB
+          - DNSName
+        - "/index.html"
