@@ -1,0 +1,221 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Common Web Stack with ALB
+Parameters:
+  Env:
+    Type: String
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+  AMIID:
+    Description: Input Amazon Linux Image ID
+    Type: AWS::EC2::Image::Id
+Resources:
+  ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "-"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: Env
+            - "-ALBSG"
+      VpcId:
+        Ref: VPCID
+  AppSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "-"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        SourceSecurityGroupId:
+          Ref: ALBSG
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: Env
+            - "-AppSG"
+      VpcId:
+        Ref: VPCID
+  Instance01:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: AMIID
+      InstanceType: t2.micro
+      KeyName:
+        Ref: KeyPair
+      SecurityGroupIds:
+      - Ref: AppSG
+      SubnetId:
+        Fn::Select:
+        - '0'
+        - Ref: Subnets
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: Env
+            - "-Instance01"
+      Tenancy: default
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ''
+          - - "#! /bin/bash -v\n"
+            - 'yum install -y httpd
+
+              '
+            - 'curl -s http://169.254.169.254/latest/meta-data/instance-id >> /var/www/html/index.html
+
+              '
+            - 'service httpd start
+
+              '
+  Instance02:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: AMIID
+      InstanceType: t2.micro
+      KeyName:
+        Ref: KeyPair
+      SecurityGroupIds:
+      - Ref: AppSG
+      SubnetId:
+        Fn::Select:
+        - '0'
+        - Ref: Subnets
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: Env
+            - "-Instance02"
+      Tenancy: default
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ''
+          - - "#! /bin/bash -v\n"
+            - 'yum install -y httpd
+
+              '
+            - 'curl -s http://169.254.169.254/latest/meta-data/instance-id >> /var/www/html/index.html
+
+              '
+            - 'service httpd start
+
+              '
+  ALBTarget:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: '30'
+      HealthCheckPath: "/index.html"
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: '5'
+      HealthyThresholdCount: '5'
+      Matcher:
+        HttpCode: '200'
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: Env
+          - "-ALBTarget"
+      Port: '80'
+      Protocol: HTTP
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: Env
+            - "-ALBTarget"
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '300'
+      - Key: stickiness.enabled
+        Value: 'false'
+      - Key: stickiness.type
+        Value: lb_cookie
+      - Key: stickiness.lb_cookie.duration_seconds
+        Value: '86400'
+      Targets:
+      - Id:
+          Ref: Instance01
+        Port: '80'
+      - Id:
+          Ref: Instance02
+        Port: '80'
+      UnhealthyThresholdCount: '2'
+      VpcId:
+        Ref: VPCID
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      LoadBalancerAttributes:
+      - Key: access_logs.s3.enabled
+        Value: 'false'
+      - Key: deletion_protection.enabled
+        Value: 'false'
+      - Key: idle_timeout.timeout_seconds
+        Value: '60'
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: Env
+          - "-ALB"
+      Scheme: internet-facing
+      SecurityGroups:
+      - Ref: ALBSG
+      Subnets:
+        Ref: Subnets
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - ''
+          - - Ref: Env
+            - "-ALB"
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - TargetGroupArn:
+          Ref: ALBTarget
+        Type: forward
+      LoadBalancerArn:
+        Ref: ALB
+      Port: '80'
+      Protocol: HTTP
+Outputs:
+  CheckURL:
+    Value:
+      Fn::Join:
+      - ''
+      - - http://
+        - Fn::GetAtt:
+          - ALB
+          - DNSName
+        - "/index.html"

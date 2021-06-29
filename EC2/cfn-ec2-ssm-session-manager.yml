@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Create EC2 which can be accessed by SSM Session Manager
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Stack Configuration
+        Parameters:
+          - ProjectName
+      -
+        Label:
+          default: EC2 Configuration
+        Parameters:
+          - VPC
+          - Subnet
+          - KeyName
+          - MyIP
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: EC2-test
+    Description: Project Name
+  VPC:
+    Type: AWS::EC2::VPC::Id
+  Subnet:
+    Type: AWS::EC2::Subnet::Id
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: "AWS::EC2::KeyPair::KeyName"
+  MyIP:
+    Description: IP address range which is allowed to access this EC2 from it
+    Type: String
+    Default: 0.0.0.0/0
+
+Resources:
+  EC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      # Amazon Linux 2
+      ImageId: ami-00d101850e971728d
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          SubnetId: !Ref Subnet
+          GroupSet:
+            - !Ref EC2SecurtyGroup
+      IamInstanceProfile:
+        Ref: SessionManagerIamInstanceProfile
+      Tags:
+          - Key: Name
+            Value: !Sub ${ProjectName}-EC2
+  EC2SecurtyGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ec2-sg-cf
+      GroupDescription: Allow SSH HTTP access only MyIP
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # http
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref MyIP
+
+  SsmSessionManagerIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      RoleName: 'SsmSessionManagerIamRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  SessionManagerIamInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref SsmSessionManagerIamRole
+
+Outputs:
+  EC2PublicIP:
+    Value: !GetAtt EC2.PublicIp
+    Description: Public IP of EC2 instance
